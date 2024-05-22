@@ -20,12 +20,6 @@ import java.util.Objects;
 public class ShortestRoutingServiceImpl implements RoutingService {
     private final DeliveryPartnerService deliveryPartnerService;
 
-    private Map<DPState, BigDecimal> dp;
-
-    private List<Integer> pathToTake;
-
-    private BigDecimal shortestPathTime;
-
     public ShortestRoutingServiceImpl(DeliveryPartnerService deliveryPartnerService) {
         this.deliveryPartnerService = deliveryPartnerService;
     }
@@ -55,11 +49,28 @@ public class ShortestRoutingServiceImpl implements RoutingService {
         }
     }
 
-    private BigDecimal getDP(DPState state) {
+    private static class Wrapper<T> {
+        private T value;
+
+        public Wrapper(T value) {
+            this.value = value;
+        }
+
+        public T getValue() {
+            return value;
+        }
+
+        public void setValue(T value) {
+            this.value = value;
+        }
+    }
+
+
+    private BigDecimal getDP(Map<DPState, BigDecimal> dp,DPState state) {
         return dp.getOrDefault(state, new BigDecimal(-1));
     }
 
-    private BigDecimal updateDP(DPState state, BigDecimal value) {
+    private BigDecimal updateDP(Map<DPState, BigDecimal> dp, DPState state, BigDecimal value) {
         dp.put(state, value);
         return value;
     }
@@ -85,43 +96,46 @@ public class ShortestRoutingServiceImpl implements RoutingService {
                customerMaskMp -> this hold the mapping of integer ( position at mask ) to Customer.
                timeTakenSoFar -> this hold the time in min information taken by deliveryPerson following the path in this recursive dfs till now.
                nextDestination -> hold the list of path taken by deliveryPerson
+               dp -> For Memoization Purpose
+               pathToTake -> Wrapper class to avoid to use the global instance variable
+               shortestPathTime -> basically a wrapper class to hold the time the following explored path would have taken. Used for Constructing the pathToTake.
     * return:
               shortestTime to deliver the order.
    */
     private BigDecimal dfs(int u, int mask, DeliveryPartner deliveryPartner, Map<Restaurant, Map<Customer, Integer>> restaurantToCustomerMp,
-                                  Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp,
-                                  BigDecimal timeTakenSoFar, List<Integer> nextDestination) {
+                           Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp,
+                           BigDecimal timeTakenSoFar, List<Integer> nextDestination, Map<DPState, BigDecimal> dp, Wrapper<List<Integer>> pathToTake, Wrapper<BigDecimal> shortestPathTime) {
         if (mask == 0) {
-            if (timeTakenSoFar.compareTo(shortestPathTime) < 0) {
-                shortestPathTime = timeTakenSoFar;
-                pathToTake = nextDestination.stream().toList();
+            if (timeTakenSoFar.compareTo(shortestPathTime.getValue()) < 0) {
+                shortestPathTime.value = timeTakenSoFar;
+                pathToTake.value = nextDestination.stream().toList();
             }
             return timeTakenSoFar;
         }
         DPState dpState = new DPState(u, mask, timeTakenSoFar);
-        if (!getDP(dpState).equals(new BigDecimal(-1))) {
-            return getDP(dpState);
+        if (!getDP(dp,dpState).equals(new BigDecimal(-1))) {
+            return getDP(dp,dpState);
         }
         int orderLength = customerMaskMp.size();
         BigDecimal shortestPossibleTime = new BigDecimal(Double.MAX_VALUE);
-        BigDecimal smallestTimeToRestaurant = travelToRestaurant(u, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenSoFar, orderLength, nextDestination);
+        BigDecimal smallestTimeToRestaurant = travelToRestaurant(u, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenSoFar, orderLength, nextDestination,dp,pathToTake,shortestPathTime);
         if (smallestTimeToRestaurant.compareTo(shortestPossibleTime) < 0) {
             shortestPossibleTime = smallestTimeToRestaurant;
         }
 
         // we will not travel to Customer if u is DeliveryPerson, else we can travel to Customer Also.
         if (u != 0) {
-            BigDecimal smallestTimeToCustomer = travelToCustomer(u, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenSoFar, orderLength, nextDestination);
+            BigDecimal smallestTimeToCustomer = travelToCustomer(u, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenSoFar, orderLength, nextDestination,dp,pathToTake,shortestPathTime);
             if (smallestTimeToCustomer.compareTo(shortestPossibleTime) < 0) {
                 shortestPossibleTime = smallestTimeToCustomer;
             }
         }
-        return updateDP(dpState, shortestPossibleTime);
+        return updateDP(dp,dpState, shortestPossibleTime);
     }
 
     private BigDecimal travelToCustomer(int u, int mask, DeliveryPartner deliveryPartner, Map<Restaurant, Map<Customer, Integer>> restaurantToCustomerMp,
-                                               Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp, BigDecimal timeTakenSoFar,
-                                               int orderLength, List<Integer> nextDestination) {
+                                        Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp, BigDecimal timeTakenSoFar,
+                                        int orderLength, List<Integer> nextDestination, Map<DPState, BigDecimal> dp, Wrapper<List<Integer>> pathToTake, Wrapper<BigDecimal> shortestPathTime) {
         BigDecimal shortestPossibleTime = new BigDecimal(Double.MAX_VALUE), min1;
         Address address = (u == 0) ? deliveryPartner.getAddress() : (u <= orderLength) ? restaurantMaskMp.get(u).getAddress() : customerMaskMp.get(u).getAddress();
         for (int i = 0; i < orderLength; i++) {
@@ -136,7 +150,7 @@ public class ShortestRoutingServiceImpl implements RoutingService {
                 BigDecimal timeTakenInMinutes = distanceToReachIfromU.multiply(new BigDecimal(3));
                 nextDestination.add(i + 1 + orderLength);
                 min1 = shortestPossibleTime.min(
-                        dfs(i + 1 + orderLength, (mask ^ (1 << (i + 1 + orderLength))), deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenInMinutes.add(timeTakenSoFar), nextDestination)
+                        dfs(i + 1 + orderLength, (mask ^ (1 << (i + 1 + orderLength))), deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenInMinutes.add(timeTakenSoFar), nextDestination, dp, pathToTake, shortestPathTime)
                 );
                 nextDestination.remove(nextDestination.size() - 1);
                 if (!min1.equals(shortestPossibleTime)) {
@@ -148,8 +162,8 @@ public class ShortestRoutingServiceImpl implements RoutingService {
     }
 
     private BigDecimal travelToRestaurant(int u, int mask, DeliveryPartner deliveryPartner, Map<Restaurant, Map<Customer, Integer>> restaurantToCustomerMp,
-                                                 Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp, BigDecimal timeTakenSoFar,
-                                                 int orderLength, List<Integer> nextDestination) {
+                                          Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp, BigDecimal timeTakenSoFar,
+                                          int orderLength, List<Integer> nextDestination, Map<DPState, BigDecimal> dp, Wrapper<List<Integer>> pathToTake, Wrapper<BigDecimal> shortestPathTime) {
         BigDecimal shortestPossibleTime = new BigDecimal(Double.MAX_VALUE), min1;
         Address address = (u == 0) ? deliveryPartner.getAddress() : (u <= orderLength) ? restaurantMaskMp.get(u).getAddress() : customerMaskMp.get(u).getAddress();
         for (int i = 0; i < orderLength; i++) {
@@ -173,7 +187,7 @@ public class ShortestRoutingServiceImpl implements RoutingService {
                         : timeTakenForCooking.subtract(timeTakenInMinutes.add(timeTakenSoFar));
                 nextDestination.add(i + 1);
                 min1 = shortestPossibleTime.min(
-                        dfs(i + 1, (mask ^ (1 << (i + 1))), deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenInMinutes.add(additionalTimeUsedForCooking).add(timeTakenSoFar), nextDestination)
+                        dfs(i + 1, (mask ^ (1 << (i + 1))), deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, timeTakenInMinutes.add(additionalTimeUsedForCooking).add(timeTakenSoFar), nextDestination, dp, pathToTake, shortestPathTime)
                 );
                 nextDestination.remove(nextDestination.size() - 1);
                 if (!min1.equals(shortestPossibleTime)) {
@@ -187,11 +201,11 @@ public class ShortestRoutingServiceImpl implements RoutingService {
     /*
         This Function is used for Constructing the Path taken by delivery Partner to fulfill the order delivery in least Possible time.
      */
-    private Route constructRoute(DeliveryPartner partner, Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp) {
+    private Route constructRoute(Wrapper<BigDecimal> shortestPathTime, Wrapper<List<Integer>> pathToTake, DeliveryPartner partner, Map<Integer, Restaurant> restaurantMaskMp, Map<Integer, Customer> customerMaskMp) {
         Route shortestRoute = new Route();
-        shortestRoute.setTimeTaken(shortestPathTime.setScale(2, RoundingMode.HALF_UP));
+        shortestRoute.setTimeTaken(shortestPathTime.getValue().setScale(2, RoundingMode.HALF_UP));
         shortestRoute.addRouteComponent(partner);
-        for (int next : pathToTake) {
+        for (int next : pathToTake.getValue()) {
             if (restaurantMaskMp.containsKey(next)) {
                 shortestRoute.addRouteComponent(restaurantMaskMp.get(next));
             } else {
@@ -235,10 +249,11 @@ public class ShortestRoutingServiceImpl implements RoutingService {
         }
         int totalLen = 2 * restaurantMaskMp.size() + 1;
         int mask = (1 << totalLen) - 2;
-        dp = new HashMap<>();
-        shortestPathTime = new BigDecimal(Double.MAX_VALUE);
+        Map<DPState, BigDecimal> dp = new HashMap<>();
+        Wrapper<List<Integer>> pathToTake = new Wrapper<>(new ArrayList<>());
+        Wrapper<BigDecimal> shortestPathTime = new Wrapper<>(BigDecimal.valueOf(Double.MAX_VALUE));
         List<Integer> nextDestination = new ArrayList<>();
-        dfs(0, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, BigDecimal.ZERO, nextDestination);
-        return constructRoute(deliveryPartner, restaurantMaskMp, customerMaskMp);
+        dfs(0, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, BigDecimal.ZERO, nextDestination,dp,pathToTake,shortestPathTime);
+        return constructRoute(shortestPathTime,pathToTake,deliveryPartner, restaurantMaskMp, customerMaskMp);
     }
 }

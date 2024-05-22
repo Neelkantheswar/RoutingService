@@ -20,7 +20,7 @@ import java.util.Objects;
 public class ShortestRoutingServiceImpl implements RoutingService {
     private final DeliveryPartnerService deliveryPartnerService;
 
-    private final Map<DPState, BigDecimal> dp;
+    private Map<DPState, BigDecimal> dp;
 
     private List<Integer> pathToTake;
 
@@ -28,8 +28,6 @@ public class ShortestRoutingServiceImpl implements RoutingService {
 
     public ShortestRoutingServiceImpl(DeliveryPartnerService deliveryPartnerService) {
         this.deliveryPartnerService = deliveryPartnerService;
-        dp = new HashMap<>();
-        shortestPathTime = new BigDecimal(Double.MAX_VALUE);
     }
 
     private static final class DPState {
@@ -237,6 +235,8 @@ public class ShortestRoutingServiceImpl implements RoutingService {
         }
         int totalLen = 2 * restaurantMaskMp.size() + 1;
         int mask = (1 << totalLen) - 2;
+        dp = new HashMap<>();
+        shortestPathTime = new BigDecimal(Double.MAX_VALUE);
         List<Integer> nextDestination = new ArrayList<>();
         dfs(0, mask, deliveryPartner, restaurantToCustomerMp, restaurantMaskMp, customerMaskMp, BigDecimal.ZERO, nextDestination);
         return constructRoute(deliveryPartner, restaurantMaskMp, customerMaskMp);
